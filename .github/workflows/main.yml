@@ -3,22 +3,69 @@ name: Deploy Coze App to GitHub Pages
 on:
   push:
     branches:
-      - main  # 或者您的主分支名称
+      - main
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: List files in repository
+        run: |
+          echo "Repository contents:"
+          ls -la
+          echo "Looking for zip files:"
+          find . -name "*.zip" -type f
 
       - name: Unzip the code
         run: |
-          # 假设您的压缩包名为 code.zip
-          unzip riyulianxi.zip -d ./dist
+          # 查找第一个zip文件并解压
+          ZIP_FILE=$(find . -name "*.zip" -type f | head -1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found zip file: $ZIP_FILE"
+            mkdir -p ./dist
+            unzip "$ZIP_FILE" -d ./dist
+            echo "Contents after unzip:"
+            ls -la ./dist
+          else
+            echo "No zip file found!"
+            exit 1
+          fi
+
+      - name: Check for index.html
+        run: |
+          if [ -f "./dist/index.html" ]; then
+            echo "Found index.html in dist/"
+          elif [ -f "./dist/*/index.html" ]; then
+            echo "Found index.html in subdirectory, moving files up"
+            SUBDIR=$(find ./dist -name "index.html" -type f | head -1 | xargs dirname)
+            mv "$SUBDIR"/* ./dist/
+            rmdir "$SUBDIR" 2>/dev/null || true
+          else
+            echo "No index.html found, listing all HTML files:"
+            find ./dist -name "*.html" -type f
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+        id: deployment
+        uses: actions/deploy-pages@v4
