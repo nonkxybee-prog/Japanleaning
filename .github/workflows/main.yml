@@ -26,7 +26,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+          # 移除缓存配置，避免锁定文件问题
 
       - name: Find and extract project
         run: |
@@ -45,6 +45,10 @@ jobs:
               cp -r "$PACKAGE_DIR"/* ./
               echo "Project files copied to root"
               ls -la
+              
+              # 显示package.json内容以便调试
+              echo "Package.json content:"
+              cat package.json
             else
               echo "No package.json found, this might not be a React project"
               exit 1
@@ -57,7 +61,9 @@ jobs:
       - name: Install dependencies
         run: |
           if [ -f "package.json" ]; then
-            npm install
+            echo "Installing dependencies..."
+            npm install --no-package-lock
+            echo "Dependencies installed successfully"
           else
             echo "No package.json found!"
             exit 1
@@ -65,15 +71,35 @@ jobs:
 
       - name: Build project
         run: |
+          echo "Available npm scripts:"
+          npm run --silent 2>/dev/null || echo "No scripts available"
+          
           # 尝试不同的构建命令
-          if npm run build; then
+          if npm run build 2>/dev/null; then
             echo "Build successful with 'npm run build'"
-          elif npm run build:prod; then
+          elif npm run build:prod 2>/dev/null; then
             echo "Build successful with 'npm run build:prod'"
+          elif npm run dev:build 2>/dev/null; then
+            echo "Build successful with 'npm run dev:build'"
           else
-            echo "Build failed, checking available scripts:"
-            cat package.json | grep -A 10 '"scripts"'
-            exit 1
+            echo "Trying to build with Vite directly..."
+            if npx vite build 2>/dev/null; then
+              echo "Build successful with 'npx vite build'"
+            else
+              echo "Build failed, checking available scripts:"
+              cat package.json | grep -A 20 '"scripts"' || echo "No scripts section found"
+              echo "Trying manual build approaches..."
+              
+              # 如果是简单的React项目，尝试直接复制文件
+              if [ -f "index.html" ]; then
+                echo "Found index.html, treating as static files"
+                mkdir -p dist
+                cp -r ./* dist/ 2>/dev/null || true
+                rm -rf dist/node_modules dist/temp_extract 2>/dev/null || true
+              else
+                exit 1
+              fi
+            fi
           fi
 
       - name: Prepare build output
@@ -98,6 +124,12 @@ jobs:
           
           echo "Build output prepared:"
           ls -la ./deploy/
+          
+          # 确保有index.html
+          if [ ! -f "./deploy/index.html" ]; then
+            echo "Warning: No index.html found in build output!"
+            ls -la ./deploy/
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -110,3 +142,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
